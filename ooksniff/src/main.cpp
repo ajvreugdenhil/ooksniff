@@ -116,7 +116,20 @@ bool printQueueSimplified(cppQueue* q)
   {
     int x;
     q->pop(&x);
-    Serial.print((x+((x*TIMING_PRECISION_PERCENTAGE)/100))/baseDuration);
+    bool found = false;
+    for (int j = 0; j < 32; j++)
+    {
+      if ((x > ((j*baseDuration*(100-TIMING_PRECISION_PERCENTAGE)/100))) && (x < ((j*baseDuration*(100+TIMING_PRECISION_PERCENTAGE)/100))))
+      {
+        Serial.print(j);
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+    {
+      Serial.print("?");
+    }
     Serial.print(" ");
   }
   Serial.println();
