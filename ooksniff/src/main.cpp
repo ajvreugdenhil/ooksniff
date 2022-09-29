@@ -3,8 +3,6 @@
 
 #define QUEUE_LENGTH 512
 
-#define MIN_CODE_LENGTH 8
-#define MAX_CODE_LENGTH 34
 #define TIMING_PRECISION_PERCENTAGE 10
 
 cppQueue q(sizeof(int), QUEUE_LENGTH, FIFO, true);
@@ -42,60 +40,45 @@ void setup()
 
 bool validateQueue(cppQueue* q)
 {
-  if (q->getCount() <= 16)
+  int durationsToVerifyCount = 16;
+
+  if (q->getCount() <= durationsToVerifyCount*2)
   {
     return false;
   }
 
-  for (int i = 8; i < q->getCount(); i++)
+  for (int i = durationsToVerifyCount; i < q->getCount(); i++)
   {
     int matches = 0;
-    for (int j = 0; j < 8; j++)
+    for (int j = 4; j < durationsToVerifyCount+4; j++)
     {
       int x;
       q->peekIdx(&x, j);
       int y;
-      q->peekIdx(&y, i);
+      q->peekIdx(&y, i+j);
       if (abs(x-y) < ((((x + y) / 2) * TIMING_PRECISION_PERCENTAGE) / 100))
       {
         matches++;
       }
     }
-    if (matches >= 7)
+    if (matches == durationsToVerifyCount)
     {
-      Serial.println(i);
       return true;
     }
   }
   return false;
 }
 
-bool transmissionFinished(cppQueue* q)
+void printQueue(cppQueue* q)
 {
-  int durationCount = 4;
-  unsigned int total = 0;
-
-  if (q->getCount() < durationCount)
+  while (!q->isEmpty())
   {
-    return false;
+    int n;
+    q->pop(&n);
+    Serial.println(n);
   }
-
-  for (int i = 0; i < durationCount; i++)
-  {
-    int value;
-    q->peekIdx(&value, i);
-    //q->peekIdx(&value, (q->getCount()) - i);
-    total += value;
-  }
-  unsigned int threshold = 2000;
-  if ((total/durationCount) > threshold)
-  {
-    return true;
-  }
-  else
-  {
-    return false;
-  }
+  Serial.println();
+  Serial.println();
 }
 
 void loop()
@@ -112,32 +95,22 @@ void loop()
     // to be analyzed.
     if (duration > 6000)
     {
-      if ((q.getCount()>7) && validateQueue(&q))
+      /*
+      if((q.getCount()>=10))
+        printQueue(&q);
+      q.clean();
+      return;
+      */
+
+      if (validateQueue(&q))
       {
         Serial.println("Match found");
+        // Full validation can take long, we expect to miss signals during this time
+        // so we override the warning
+        durationMissed = false;
       }
-      else
-      {
-        q.clean();
-      }
-      // validation takes long, we expect to miss signals during this time
-      // so we override the warning
-      durationMissed = false;
+      q.clean();
     }
-
-    /*
-    if (q.isFull())
-    {
-      while (!q.isEmpty())
-      {
-        int n;
-        q.pop(&n);
-        Serial.println(n);
-      }
-      Serial.println();
-      Serial.println();
-    }
-    */
   }
 
   if (durationMissed)
