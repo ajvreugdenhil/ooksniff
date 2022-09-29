@@ -69,7 +69,7 @@ bool validateQueue(cppQueue* q)
   return false;
 }
 
-void printQueue(cppQueue* q)
+void printQueueRaw(cppQueue* q)
 {
   while (!q->isEmpty())
   {
@@ -79,6 +79,48 @@ void printQueue(cppQueue* q)
   }
   Serial.println();
   Serial.println();
+}
+
+bool printQueueSimplified(cppQueue* q)
+{
+  int lowest;
+  q->peekIdx(&lowest, 0);
+  for (int i = 0; i < q->getCount(); i++)
+  {
+    int x;
+    q->peekIdx(&x, i);
+    if (x < lowest)
+    {
+      lowest = x;
+    }
+  }
+
+  unsigned int total = 0;
+  int count = 0;
+  for (int i = 0; i < q->getCount(); i++)
+  {
+    int x;
+    q->peekIdx(&x, i);
+    if (abs(lowest-x) < ((lowest * TIMING_PRECISION_PERCENTAGE) / 100))
+    {
+      count++;
+      total += x;
+    }
+  }
+  int baseDuration = total/count;
+
+  Serial.print("(");
+  Serial.print(baseDuration);
+  Serial.print(") ");
+  for (int i = 0; i < q->getCount(); i++)
+  {
+    int x;
+    q->pop(&x);
+    Serial.print((x+((x*TIMING_PRECISION_PERCENTAGE)/100))/baseDuration);
+    Serial.print(" ");
+  }
+  Serial.println();
+  return true;
 }
 
 void loop()
@@ -95,16 +137,9 @@ void loop()
     // to be analyzed.
     if (duration > 6000)
     {
-      /*
-      if((q.getCount()>=10))
-        printQueue(&q);
-      q.clean();
-      return;
-      */
-
       if (validateQueue(&q))
       {
-        Serial.println("Match found");
+        printQueueSimplified(&q);
         // Full validation can take long, we expect to miss signals during this time
         // so we override the warning
         durationMissed = false;
