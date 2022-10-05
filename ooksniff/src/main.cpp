@@ -4,6 +4,7 @@
 #define QUEUE_LENGTH 1024
 #define TIMING_PRECISION_PERCENTAGE 50
 #define SIGNAL_INPUT_PIN D5
+#define SIGNAL_OUTPUT_PIN D4
 
 cppQueue q(sizeof(int), QUEUE_LENGTH, FIFO, true);
 
@@ -37,6 +38,8 @@ void setup()
   durationMissed = false;
   pinMode(SIGNAL_INPUT_PIN, INPUT);
   enableReceive(SIGNAL_INPUT_PIN);
+  pinMode(SIGNAL_OUTPUT_PIN, OUTPUT);
+  digitalWrite(SIGNAL_OUTPUT_PIN, LOW);
 }
 
 // Relies on the data being repeatedly sent in one transmission
@@ -174,7 +177,7 @@ void loop()
     // When we encounter a long duration between edges, we cannot be inside
     // an active transmission. So this is the best time to send saved data
     // to be analyzed.
-    if (duration > 8000)
+    if (duration > 6000)
     {
       if (!durationMissed)
       {
