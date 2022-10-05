@@ -108,9 +108,10 @@ void printQueueRaw(cppQueue *q)
 
 bool printQueueSimplified(cppQueue *q)
 {
+  int queueCount = q->getCount();
   int lowest;
   q->peekIdx(&lowest, 0);
-  for (int i = 0; i < q->getCount(); i++)
+  for (int i = 0; i < queueCount; i++)
   {
     int x;
     q->peekIdx(&x, i);
@@ -122,7 +123,7 @@ bool printQueueSimplified(cppQueue *q)
 
   unsigned int total = 0;
   int count = 0;
-  for (int i = 0; i < q->getCount(); i++)
+  for (int i = 0; i < queueCount; i++)
   {
     int x;
     q->peekIdx(&x, i);
@@ -137,10 +138,7 @@ bool printQueueSimplified(cppQueue *q)
   Serial.print("(t:");
   Serial.print(baseDuration);
   Serial.print(") ");
-  Serial.print("(c:");
-  Serial.print(q->getCount());
-  Serial.print(") ");
-  for (int i = 0; i < q->getCount(); i++)
+  for (int i = 0; i < queueCount; i++)
   {
     int x;
     q->pop(&x);
