@@ -11,6 +11,13 @@ cppQueue q(sizeof(int), QUEUE_LENGTH, FIFO, true);
 volatile unsigned int newDuration;
 volatile bool durationMissed;
 
+struct dataFrame
+{
+  int baseDuration;
+  int length;
+  int* data;
+};
+
 void IRAM_ATTR handleInterrupt()
 {
   static unsigned long lastTime = 0;
@@ -42,46 +49,15 @@ void setup()
   digitalWrite(SIGNAL_OUTPUT_PIN, LOW);
 }
 
-// Relies on the data being repeatedly sent in one transmission
-bool validateQueueRepeatingPattern(cppQueue *q)
-{
-  int durationsToVerifyCount = 8;
-
-  if (q->getCount() <= durationsToVerifyCount * 2)
-  {
-    return false;
-  }
-
-  for (int i = durationsToVerifyCount; i < q->getCount(); i++)
-  {
-    int matches = 0;
-    for (int j = 4; j < durationsToVerifyCount + 4; j++)
-    {
-      int x;
-      q->peekIdx(&x, j);
-      int y;
-      q->peekIdx(&y, i + j);
-      if (abs(x - y) < ((((x + y) / 2) * TIMING_PRECISION_PERCENTAGE) / 100))
-      {
-        matches++;
-      }
-    }
-    if (matches == durationsToVerifyCount)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Cannot handle much noise
+// Relies on minimum frame size and minimum baud rate
 bool validateQueueSimple(cppQueue *q)
 {
   int count = q->getCount();
   int maxExpectedAverageDuration = 2000;
-  int minDataLength = 8;
+  int minDataLength = 16;
 
-  if (count < minDataLength*2)
+  if (count < minDataLength)
   {
     return false;
   }
@@ -109,10 +85,37 @@ void printQueueRaw(cppQueue *q)
   Serial.println();
 }
 
-bool printQueueSimplified(cppQueue *q)
+void printFrame(dataFrame* frame)
 {
+  Serial.print("(t:");
+  Serial.print(frame->baseDuration);
+  Serial.print(") ");
+  for (int i = 0; i < frame->length; i++)
+  {
+    int x = frame->data[i];
+    if (x == -1)
+    {
+      Serial.print("?");
+    }
+    else
+    {
+      Serial.print(x);
+    }
+    Serial.print(" ");
+  }
+  Serial.println();
+}
+
+bool populateFrame(cppQueue* q, dataFrame* frame)
+{
+  if (q == NULL || frame == NULL || frame->length == 0 || frame->data == NULL)
+  {
+    return false;
+  }
+  // Find lowest value in queue
   int queueCount = q->getCount();
   int lowest;
+
   q->peekIdx(&lowest, 0);
   for (int i = 0; i < queueCount; i++)
   {
@@ -124,6 +127,8 @@ bool printQueueSimplified(cppQueue *q)
     }
   }
 
+  // Find average of all values that are within 10% of lowest.
+  // Median may be better but is more expensive
   unsigned int total = 0;
   int count = 0;
   for (int i = 0; i < queueCount; i++)
@@ -136,32 +141,31 @@ bool printQueueSimplified(cppQueue *q)
       total += x;
     }
   }
-  int baseDuration = total / count;
+  frame->baseDuration = total / count;
 
-  Serial.print("(t:");
-  Serial.print(baseDuration);
-  Serial.print(") ");
   for (int i = 0; i < queueCount; i++)
   {
+    if (i >= frame->length)
+    {
+      return false;
+    }
     int x;
-    q->pop(&x);
+    q->peekIdx(&x, i);
     bool found = false;
     for (int j = 0; j < 12; j++)
     {
-      if ((x > ((j * baseDuration * (100 - TIMING_PRECISION_PERCENTAGE) / 100))) && (x < ((j * baseDuration * (100 + TIMING_PRECISION_PERCENTAGE) / 100))))
+      if ((x > ((j * frame->baseDuration * (100 - TIMING_PRECISION_PERCENTAGE) / 100))) && (x < ((j * frame->baseDuration * (100 + TIMING_PRECISION_PERCENTAGE) / 100))))
       {
-        Serial.print(j);
+        frame->data[i] = j;
         found = true;
         break;
       }
     }
     if (!found)
     {
-      Serial.print("?");
+      frame->data[i] = -1;
     }
-    Serial.print(" ");
   }
-  Serial.println();
   return true;
 }
 
@@ -177,17 +181,17 @@ void loop()
     // When we encounter a long duration between edges, we cannot be inside
     // an active transmission. So this is the best time to send saved data
     // to be analyzed.
-    if (duration > 6000)
+    if (duration > 8000)
     {
       if (!durationMissed)
       {
         if (validateQueueSimple(&q))
         {
-          printQueueSimplified(&q);
-          // printQueueRaw(&q);
-          //  Full validation can take long, we expect to miss signals during this time
-          //  so we override the warning
-          durationMissed = false;
+          int count = q.getCount();
+          int data[count];
+          dataFrame frame = {0, count, data};
+          populateFrame(&q, &frame);
+          printFrame(&frame);
         }
       }
       q.clean();
