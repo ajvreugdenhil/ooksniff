@@ -1,15 +1,16 @@
 $fn = 64;
 
 nodemcu_x = 26;
-nodemcu_y = 49;
+nodemcu_y = 49.5;
 nodemcu_z = 5;
 
-transmitter_x = 29.5;
-transmitter_y = 15.5;
+transmitter_x = 29.9;
+transmitter_y = 15.7;
 transmitter_z = 7;
 
 divider_y = 2;
 wiring_z = 4;
+transmitter_base_wall_thickness = 1.5;
 
 box_thickness = 2.5;
 box_bottom_thickness = 2;
@@ -98,6 +99,14 @@ module box()
         // Divider
         divider_height = max(nodemcu_z, transmitter_z);
         translate([0,-divider_y/2 + (box_inside_y-nodemcu_y),divider_height/2+box_bottom_thickness]) cube([box_inside_x,divider_y,divider_height], center=true);
+        // Base for transmitter
+        h = 1.5;
+        translate([0,-transmitter_y/2 + box_inside_y/2,h/2+box_bottom_thickness]) 
+        difference() 
+        {
+            cube([transmitter_x,transmitter_y,h], center=true);
+            cube([transmitter_x,transmitter_y-transmitter_base_wall_thickness*2,h],center=true);
+        }
         // Nodemcu walls
         wall_width = (box_inside_x - nodemcu_x)/2;
         for( i = [1,-1])
