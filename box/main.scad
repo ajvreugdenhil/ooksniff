@@ -29,12 +29,12 @@ box_outside_y = box_inside_y + box_thickness*2;
 box_outside_z = box_inside_z + box_top_thickness + box_bottom_thickness;
 
 usb_cutout_height = 4;
-usb_cutout_offset_z = 1;
-usb_cutout_offset_x = 6;
+usb_cutout_offset_z = 2;
+usb_cutout_offset_x = 7;
 usb_cutout_width = 8.5;
 antenna_radius = 6.5/2;
 antenna_height = 4;
-antenna_elongation = 2;
+antenna_elongation = 20; //hack but whatever
 
 // yea yea i know, horrible misuse of words
 module prism(lower, upper, length, height)
@@ -88,7 +88,7 @@ module box()
                 // Big Cutout
                 translate([0,0,box_bottom_thickness+(box_inside_z+box_top_thickness)/2]) cube([box_inside_x, box_inside_y, box_inside_z+box_top_thickness], center=true);
                 // Lid cutout
-                translate([0,box_thickness/2,box_bottom_thickness+box_inside_z]) 
+                translate([0,-box_thickness/2,box_bottom_thickness+box_inside_z]) 
                     prism(lower=box_inside_x+box_thickness, upper=box_inside_x, length=box_inside_y+box_thickness, height=box_top_thickness);
             }
             
@@ -173,5 +173,4 @@ module lid()
 box();
 
 translate([box_outside_x + 10,box_inside_y/2 + box_thickness/2,0])
-rotate([0,0,180])
 lid();
