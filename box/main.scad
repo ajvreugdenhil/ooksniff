@@ -5,11 +5,14 @@ nodemcu_y = 49.9;
 nodemcu_z = 5;
 
 transmitter_x = 29.9;
-transmitter_y = 15.7;
-transmitter_z = 7;
+transmitter_y = 5.5;
+transmitter_z = 15.5;
 
-divider_y = 2;
-wiring_z = 4;
+divider_y = 20;
+divider_wall_thickness = 1;
+wiring_z = 0;
+wiring_x = 6;
+divider_x = max(transmitter_x, nodemcu_x) - wiring_x*2;
 transmitter_base_wall_thickness = 1.5;
 
 box_thickness = 2.5;
@@ -27,10 +30,11 @@ box_outside_z = box_inside_z + box_top_thickness + box_bottom_thickness;
 
 usb_cutout_height = 4;
 usb_cutout_offset_z = 1;
-usb_cutout_offset_x = 0;
+usb_cutout_offset_x = 6;
 usb_cutout_width = 8.5;
-antenna_radius = 7/2;
-antenna_height = 1;
+antenna_radius = 6.5/2;
+antenna_height = 4;
+antenna_elongation = 2;
 
 // yea yea i know, horrible misuse of words
 module prism(lower, upper, length, height)
@@ -95,6 +99,7 @@ module box()
                 usb_cutout_height/2+box_bottom_thickness+usb_cutout_offset_z]) 
                 cube([usb_cutout_width,box_thickness,usb_cutout_height], center=true);
             // Antenna cutout
+            translate([0,-(antenna_radius*2 - transmitter_y)/2,0]) 
             translate([
                 -box_thickness-box_inside_x/2,
                 nodemcu_y + divider_y + transmitter_y/2,
@@ -103,7 +108,7 @@ module box()
                 {
                     rotate([0,90,0]) 
                         cylinder(h=box_thickness, r=antenna_radius);
-                    translate([0,0,2])     
+                    translate([0,0,antenna_elongation])     
                         rotate([0,90,0]) 
                         cylinder(h=box_thickness, r=antenna_radius);
                 }       
@@ -114,18 +119,22 @@ module box()
             0,
             divider_y/2 + nodemcu_y,
             divider_height/2+box_bottom_thickness]) 
-            cube([box_inside_x,divider_y,divider_height], center=true);
-        // Base for transmitter
-        h = 1.5;
-        translate([
-            0,
-            transmitter_y/2 + nodemcu_y + divider_y,
-            h/2+box_bottom_thickness]) 
             difference() 
             {
-                cube([transmitter_x,transmitter_y,h], center=true);
-                cube([transmitter_x,transmitter_y-transmitter_base_wall_thickness*2,h],center=true);
+                cube([divider_x,divider_y,divider_height], center=true);
+                cube([divider_x-divider_wall_thickness*2,divider_y-divider_wall_thickness*2,divider_height], center=true);
             }
+        // Base for transmitter
+        // h = 1.5;
+        // translate([
+            // 0,
+            // transmitter_y/2 + nodemcu_y + divider_y,
+            // h/2+box_bottom_thickness]) 
+            // difference() 
+            // {
+            //     cube([transmitter_x,transmitter_y,h], center=true);
+            //     cube([transmitter_x,transmitter_y-transmitter_base_wall_thickness*2,h],center=true);
+            // }
         // Nodemcu walls
         wall_width = (box_inside_x - nodemcu_x)/2;
         for( i = [1,-1])
