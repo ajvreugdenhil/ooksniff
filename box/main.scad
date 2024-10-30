@@ -168,6 +168,14 @@ module lid()
             }
         }
     }
+    translate([0,0,box_top_thickness]) 
+        rotate([0,0,90])
+        linear_extrude(height = 0.4) 
+        text("I'm snorfin' here", 
+            halign = "center", 
+            size=7, 
+            font="Liberation Sans:style=Bold", 
+            valign="center");
 }
 
 box();
