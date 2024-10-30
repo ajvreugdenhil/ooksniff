@@ -1,10 +1,26 @@
+/*
+VSPI is SPI 3
+
+SPID = MOSI = data out
+SPIQ = MISO = data in
+
+VSPICS0   GPIO 5
+VSPICLK   GPIO 18
+VSPID     GPIO 23  MOSI
+VSPIQ     GPIO 19  MISO
+
+TODO: the two interrupt pins
+*/
+
 #include <Arduino.h>
 #include <cppQueue.h>
+#include <ELECHOUSE_CC1101_SRC_DRV.h>
 
 #define QUEUE_LENGTH 1024
 #define TIMING_PRECISION_PERCENTAGE 50
-#define SIGNAL_INPUT_PIN D5
-#define SIGNAL_OUTPUT_PIN D4
+#define GDO0_PIN 17
+#define GDO2_PIN 16
+#define LED_PIN 22
 
 cppQueue q(sizeof(int), QUEUE_LENGTH, FIFO, true);
 
@@ -33,9 +49,9 @@ void IRAM_ATTR handleInterrupt()
   lastTime = time;
 }
 
-void enableReceive(int interrupt)
+void enableReceive(int pin)
 {
-  attachInterrupt(digitalPinToInterrupt(SIGNAL_INPUT_PIN), handleInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pin), handleInterrupt, CHANGE);
 }
 
 void setup()
@@ -43,10 +59,34 @@ void setup()
   Serial.begin(460800);
   newDuration = 0;
   durationMissed = false;
-  pinMode(SIGNAL_INPUT_PIN, INPUT);
-  enableReceive(SIGNAL_INPUT_PIN);
-  pinMode(SIGNAL_OUTPUT_PIN, OUTPUT);
-  digitalWrite(SIGNAL_OUTPUT_PIN, LOW);
+  pinMode(GDO0_PIN, INPUT);
+  pinMode(GDO2_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  enableReceive(GDO0_PIN);
+
+  Serial.println("Starting cc1101");
+  if (ELECHOUSE_cc1101.getCC1101())
+  {
+    Serial.println("Connection OK");
+  }
+  else
+  {
+    Serial.println("Connection Error");
+  }
+  ELECHOUSE_cc1101.Init();
+  ELECHOUSE_cc1101.setGDO0(GDO0_PIN);
+  ELECHOUSE_cc1101.setCCMode(0);
+  ELECHOUSE_cc1101.setModulation(2);  // 0 = 2-FSK, 1 = GFSK, 2 = ASK/OOK, 3 = 4-FSK, 4 = MSK.
+  ELECHOUSE_cc1101.setMHZ(433.92);
+  ELECHOUSE_cc1101.setSyncMode(0);    // Combined sync-word qualifier mode. 0 = No preamble/sync. 1 = 16 sync word bits detected. 2 = 16/16 sync word bits detected. 3 = 30/32 sync word bits detected. 4 = No preamble/sync, carrier-sense above threshold. 5 = 15/16 + carrier-sense above threshold. 6 = 16/16 + carrier-sense above threshold. 7 = 30/32 + carrier-sense above threshold.
+  ELECHOUSE_cc1101.setCrc(0);
+  ELECHOUSE_cc1101.setPktFormat(3);   // Asynchronous mode
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_IOCFG0, 0x0D);          // Set GDO0 to serial data output (0x0D)
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_IOCFG2, 0x0E);          // Set GDO2 to carrier sense
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01110111);  // set carrier sense thresholds
+  ELECHOUSE_cc1101.SetRx();
+  Serial.println("Started cc1101");
 }
 
 // Cannot handle much noise
