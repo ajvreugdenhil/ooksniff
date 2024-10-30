@@ -16,16 +16,25 @@ TODO: the two interrupt pins
 #include <cppQueue.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 
-#define QUEUE_LENGTH 1024
+//#define QUEUE_LENGTH 1024
+#define QUEUE_LENGTH 512
 #define TIMING_PRECISION_PERCENTAGE 50
 #define GDO0_PIN 17
 #define GDO2_PIN 16
 #define LED_PIN 22
 
-cppQueue q(sizeof(int), QUEUE_LENGTH, FIFO, true);
+#define DURATION_FILTER_MIN 50
+#define DURATION_FILTER_MAX 5000
+#define FILTER_DATA_COUNT_MIN 16
+
+cppQueue* queue = NULL;
+
+TaskHandle_t analyze_task_handle;
+bool analysis_active = false;
 
 volatile unsigned int newDuration;
 volatile bool durationMissed;
+volatile bool transmissionFinished;
 
 struct dataFrame
 {
@@ -34,25 +43,30 @@ struct dataFrame
   int* data;
 };
 
-void IRAM_ATTR handleInterrupt()
+void IRAM_ATTR interruptGDO0()
 {
   static unsigned long lastTime = 0;
-
   if (newDuration != 0)
   {
     durationMissed = true;
+    digitalWrite(LED_PIN, LOW);
   }
-
   const unsigned long time = micros();
   newDuration = time - lastTime;
-
   lastTime = time;
+}
+
+void IRAM_ATTR interruptGDO2()
+{
+  transmissionFinished = true;
 }
 
 void enableReceive(int pin)
 {
-  attachInterrupt(digitalPinToInterrupt(pin), handleInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pin), interruptGDO0, CHANGE);
 }
+
+
 
 void setup()
 {
@@ -62,8 +76,11 @@ void setup()
   pinMode(GDO0_PIN, INPUT);
   pinMode(GDO2_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
 
+  queue = new cppQueue(sizeof(int), QUEUE_LENGTH, FIFO, true);
   enableReceive(GDO0_PIN);
+  attachInterrupt(digitalPinToInterrupt(GDO2_PIN), interruptGDO2, FALLING);
 
   Serial.println("Starting cc1101");
   if (ELECHOUSE_cc1101.getCC1101())
@@ -95,9 +112,8 @@ bool validateQueueSimple(cppQueue *q)
 {
   int count = q->getCount();
   int maxExpectedAverageDuration = 2000;
-  int minDataLength = 16;
 
-  if (count < minDataLength)
+  if (count < FILTER_DATA_COUNT_MIN)
   {
     return false;
   }
@@ -161,7 +177,7 @@ bool populateFrame(cppQueue* q, dataFrame* frame)
   {
     int x;
     q->peekIdx(&x, i);
-    if (x < lowest)
+    if (x < lowest && x > DURATION_FILTER_MIN)
     {
       lowest = x;
     }
@@ -209,38 +225,68 @@ bool populateFrame(cppQueue* q, dataFrame* frame)
   return true;
 }
 
+void Analyze(void * parameter)
+{
+  cppQueue* q_analysis = (cppQueue*) parameter;
+  if (!durationMissed)
+  {
+    if (validateQueueSimple(q_analysis))
+    {
+      int count = q_analysis->getCount();
+      int data[count];
+      dataFrame frame = {0, count, data};
+      populateFrame(q_analysis, &frame);
+      printFrame(&frame);
+    }
+  }
+  delete(q_analysis);
+  analysis_active = false;
+  vTaskDelete(analyze_task_handle);
+}
+
 void loop()
 {
   if (newDuration != 0)
   {
     // newDuration is volatile so we explicitly take its current value
     unsigned int duration = newDuration;
-    q.push(&duration);
+    queue->push(&duration);
     newDuration = 0;
 
     // When we encounter a long duration between edges, we cannot be inside
     // an active transmission. So this is the best time to send saved data
     // to be analyzed.
-    if (duration > 8000)
+    //if (duration > DURATION_FILTER_MAX && !analysis_active)
+    
+    if (transmissionFinished && !analysis_active)
     {
-      if (!durationMissed)
+      if (queue->getCount() > FILTER_DATA_COUNT_MIN)
       {
-        if (validateQueueSimple(&q))
-        {
-          int count = q.getCount();
-          int data[count];
-          dataFrame frame = {0, count, data};
-          populateFrame(&q, &frame);
-          printFrame(&frame);
-        }
+        cppQueue* q_analysis = queue;
+        queue = new cppQueue(sizeof(int), QUEUE_LENGTH, FIFO, true);
+
+        xTaskCreatePinnedToCore(
+          Analyze,    /* Function to implement the task */
+          "analyze",  /* Name of the task */
+          10000,      /* Stack size in words */
+          q_analysis, /* Task input parameter */
+          0,          /* Priority of the task */
+          &analyze_task_handle,  /* Task handle. */
+          0);         /* Core where the task should run */
+        analysis_active = true;
       }
-      q.clean();
+      else
+      {
+        queue->clean();
+      }
+      transmissionFinished = false;
     }
   }
 
   if (durationMissed)
   {
-    Serial.println("!");
+    //Serial.println("!");
     durationMissed = false;
+    digitalWrite(LED_PIN, HIGH);
   }
 }
