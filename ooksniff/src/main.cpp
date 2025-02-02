@@ -16,14 +16,23 @@ TODO: the two interrupt pins
 #include <cppQueue.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 
-//#define QUEUE_LENGTH 1024
-#define QUEUE_LENGTH 512
-#define TIMING_PRECISION_PERCENTAGE 50
+
+String shrew = "          _,____ c--"
+   ".\r\n"
+   "        /`  \\   ` _"
+   "^_\\\r\n"
+   " jgs`~~~\\  _/---\'"
+   "\\\\  ^\r\n"
+   "         `~~~     ~~"
+   " ";
+
+#define QUEUE_LENGTH 1024
 #define GDO0_PIN 17
 #define GDO2_PIN 16
 #define LED_PIN 22
 
-#define DURATION_FILTER_MIN 50
+#define TIMING_PRECISION_PERCENTAGE 50
+#define DURATION_FILTER_MIN 10
 #define DURATION_FILTER_MAX 5000
 #define FILTER_DATA_COUNT_MIN 16
 
@@ -34,7 +43,8 @@ bool analysis_active = false;
 
 volatile unsigned int newDuration;
 volatile bool durationMissed;
-volatile bool transmissionFinished;
+volatile unsigned int lastTrasmissionTime;
+volatile bool transmissionFinshed = false;
 
 struct dataFrame
 {
@@ -49,7 +59,7 @@ void IRAM_ATTR interruptGDO0()
   if (newDuration != 0)
   {
     durationMissed = true;
-    digitalWrite(LED_PIN, LOW);
+    //digitalWrite(LED_PIN, LOW);
   }
   const unsigned long time = micros();
   newDuration = time - lastTime;
@@ -58,7 +68,8 @@ void IRAM_ATTR interruptGDO0()
 
 void IRAM_ATTR interruptGDO2()
 {
-  transmissionFinished = true;
+  lastTrasmissionTime = micros();
+  transmissionFinshed = true;
 }
 
 void enableReceive(int pin)
@@ -71,8 +82,18 @@ void enableReceive(int pin)
 void setup()
 {
   Serial.begin(460800);
+  delay(1000);
+  Serial.println("What the sneef?");
+  delay(1000);
+  Serial.println(shrew);
+  delay(1000);
+  Serial.println("I'm snorfin' here!!!\n\n");
+  delay(3000);
+
+
   newDuration = 0;
   durationMissed = false;
+  lastTrasmissionTime = 0;
   pinMode(GDO0_PIN, INPUT);
   pinMode(GDO2_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
@@ -91,6 +112,20 @@ void setup()
   {
     Serial.println("Connection Error");
   }
+
+//   The absolute threshold related to the RSSI
+// value depends on the following register fields:
+// AGCCTRL2.MAX_LNA_GAIN
+// AGCCTRL2.MAX_DVGA_GAIN
+// AGCCTRL1.CARRIER_SENSE_ABS_THR
+// AGCCTRL2.MAGN_TARGET
+
+//If the threshold is set high, i.e. only strong
+// signals are wanted, the threshold should be
+// adjusted upwards by first reducing the
+// MAX_LNA_GAIN value and then the
+// MAX_DVGA_GAIN value.
+
   ELECHOUSE_cc1101.Init();
   ELECHOUSE_cc1101.setGDO0(GDO0_PIN);
   ELECHOUSE_cc1101.setCCMode(0);
@@ -101,7 +136,23 @@ void setup()
   ELECHOUSE_cc1101.setPktFormat(3);   // Asynchronous mode
   ELECHOUSE_cc1101.SpiWriteReg(CC1101_IOCFG0, 0x0D);          // Set GDO0 to serial data output (0x0D)
   ELECHOUSE_cc1101.SpiWriteReg(CC1101_IOCFG2, 0x0E);          // Set GDO2 to carrier sense
-  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01110111);  // set carrier sense thresholds
+  
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0b00000011);  // set gain limits (reset value)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0b00111011);  // set gain limits (maximally limited lna gain)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0b11111011);  // set gain limits (maximally limited lna and dvga gain)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0b11000111);  // set gain limits (lib default)
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0b11100111);  // set gain limits (mine)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, );  // set gain limits (test)
+  
+
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01000000);  // set carrier sense thresholds (reset value)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01001000);  // set carrier sense thresholds (no relative, no abs)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01001001);  // set carrier sense thresholds (no relative, -7 abs)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01000111);  // set carrier sense thresholds (no rel, +7 abs)
+  // ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01111000);  // set carrier sense thresholds (hi rel, no abs)
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01000111);  // set carrier sense thresholds ()
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0b01110111);  // set carrier sense thresholds ()
+  
   ELECHOUSE_cc1101.SetRx();
   Serial.println("Started cc1101");
 }
@@ -177,13 +228,13 @@ bool populateFrame(cppQueue* q, dataFrame* frame)
   {
     int x;
     q->peekIdx(&x, i);
-    if (x < lowest && x > DURATION_FILTER_MIN)
+    if (x < lowest) // && x > DURATION_FILTER_MIN) // ignore very short times
     {
       lowest = x;
     }
   }
 
-  // Find average of all values that are within 10% of lowest.
+  // Find average of all values that are within n% of lowest.
   // Median may be better but is more expensive
   unsigned int total = 0;
   int count = 0;
@@ -236,7 +287,10 @@ void Analyze(void * parameter)
       int data[count];
       dataFrame frame = {0, count, data};
       populateFrame(q_analysis, &frame);
-      printFrame(&frame);
+      if (frame.baseDuration <= DURATION_FILTER_MAX)
+      {
+        printFrame(&frame);
+      }
     }
   }
   delete(q_analysis);
@@ -246,47 +300,45 @@ void Analyze(void * parameter)
 
 void loop()
 {
-  if (newDuration != 0)
+  digitalWrite(LED_PIN, !digitalRead(GDO0_PIN));
+
+
+  if (newDuration > 100)
   {
     // newDuration is volatile so we explicitly take its current value
     unsigned int duration = newDuration;
     queue->push(&duration);
-    newDuration = 0;
+  }
+  newDuration = 0;
+  
 
-    // When we encounter a long duration between edges, we cannot be inside
-    // an active transmission. So this is the best time to send saved data
-    // to be analyzed.
-    //if (duration > DURATION_FILTER_MAX && !analysis_active)
-    
-    if (transmissionFinished && !analysis_active)
+  if (!analysis_active)
+  {
+    if (transmissionFinshed && queue->getCount() > FILTER_DATA_COUNT_MIN)
     {
-      if (queue->getCount() > FILTER_DATA_COUNT_MIN)
-      {
-        cppQueue* q_analysis = queue;
-        queue = new cppQueue(sizeof(int), QUEUE_LENGTH, FIFO, true);
+      transmissionFinshed = false;
+      cppQueue* q_analysis = queue;
+      queue = new cppQueue(sizeof(int), QUEUE_LENGTH, FIFO, true);
 
-        xTaskCreatePinnedToCore(
-          Analyze,    /* Function to implement the task */
-          "analyze",  /* Name of the task */
-          10000,      /* Stack size in words */
-          q_analysis, /* Task input parameter */
-          0,          /* Priority of the task */
-          &analyze_task_handle,  /* Task handle. */
-          0);         /* Core where the task should run */
-        analysis_active = true;
-      }
-      else
-      {
-        queue->clean();
-      }
-      transmissionFinished = false;
+      xTaskCreatePinnedToCore(
+        Analyze,    /* Function to implement the task */
+        "analyze",  /* Name of the task */
+        10000,      /* Stack size in words */
+        q_analysis, /* Task input parameter */
+        0,          /* Priority of the task */
+        &analyze_task_handle,  /* Task handle. */
+        0);         /* Core where the task should run */
+      analysis_active = true;
+    
+      queue->clean();
     }
   }
+
 
   if (durationMissed)
   {
     //Serial.println("!");
     durationMissed = false;
-    digitalWrite(LED_PIN, HIGH);
+    //digitalWrite(LED_PIN, HIGH);
   }
 }
