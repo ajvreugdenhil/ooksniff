@@ -26,13 +26,14 @@ String shrew = "          _,____ c--"
    "         `~~~     ~~"
    " ";
 
-#define QUEUE_LENGTH 1024
+#define QUEUE_LENGTH 2048
 #define GDO0_PIN 17
 #define GDO2_PIN 16
 #define LED_PIN 22
 
-#define TIMING_PRECISION_PERCENTAGE 50
-#define DURATION_FILTER_MIN 10
+#define PRECISION_FACTOR_BASE_DURATION 0.5
+#define PRECISION_FACTOR_POPULATING 0.4
+#define DURATION_FILTER_MIN 5
 #define DURATION_FILTER_MAX 5000
 #define FILTER_DATA_COUNT_MIN 16
 
@@ -41,9 +42,10 @@ cppQueue* queue = NULL;
 TaskHandle_t analyze_task_handle;
 bool analysis_active = false;
 
-volatile unsigned int newDuration;
+volatile int newDuration;
+volatile unsigned long lastTime;
 volatile bool durationMissed;
-volatile unsigned int lastTrasmissionTime;
+volatile unsigned int lastTransmissionTime;
 volatile bool transmissionFinshed = false;
 
 struct dataFrame
@@ -55,20 +57,23 @@ struct dataFrame
 
 void IRAM_ATTR interruptGDO0()
 {
-  static unsigned long lastTime = 0;
+  const unsigned long time = micros();
   if (newDuration != 0)
   {
     durationMissed = true;
-    //digitalWrite(LED_PIN, LOW);
   }
-  const unsigned long time = micros();
   newDuration = time - lastTime;
+  if (digitalRead(GDO0_PIN))
+  {
+    newDuration *= -1;
+  }
   lastTime = time;
 }
 
+
 void IRAM_ATTR interruptGDO2()
 {
-  lastTrasmissionTime = micros();
+  lastTransmissionTime = micros();
   transmissionFinshed = true;
 }
 
@@ -83,6 +88,7 @@ void setup()
 {
   Serial.begin(460800);
   delay(1000);
+  Serial.println();
   Serial.println("What the sneef?");
   delay(1000);
   Serial.println(shrew);
@@ -92,8 +98,9 @@ void setup()
 
 
   newDuration = 0;
+  lastTime = 0;
   durationMissed = false;
-  lastTrasmissionTime = 0;
+  lastTransmissionTime = 0;
   pinMode(GDO0_PIN, INPUT);
   pinMode(GDO2_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
@@ -174,6 +181,7 @@ bool validateQueueSimple(cppQueue *q)
   {
     int x;
     q->peekIdx(&x, i);
+    x = abs(x);
     total += x;
   }
   int average = total/count;
@@ -186,9 +194,9 @@ void printQueueRaw(cppQueue *q)
   {
     int n;
     q->pop(&n);
-    Serial.println(n);
+    Serial.print(n);
+    Serial.print(" ");
   }
-  Serial.println();
   Serial.println();
 }
 
@@ -196,11 +204,17 @@ void printFrame(dataFrame* frame)
 {
   Serial.print("(t:");
   Serial.print(frame->baseDuration);
+  Serial.print(", c:");
+  Serial.print(frame->length);
   Serial.print(") ");
   for (int i = 0; i < frame->length; i++)
   {
     int x = frame->data[i];
-    if (x == -1)
+    if (x >= 0)
+    {
+      Serial.print(" ");
+    }
+    if (x == 0)
     {
       Serial.print("?");
     }
@@ -213,86 +227,131 @@ void printFrame(dataFrame* frame)
   Serial.println();
 }
 
-bool populateFrame(cppQueue* q, dataFrame* frame)
+int getBaseDuration(cppQueue* q)
 {
-  if (q == NULL || frame == NULL || frame->length == 0 || frame->data == NULL)
-  {
-    return false;
-  }
+  // TODO maybe use buckets?
   // Find lowest value in queue
   int queueCount = q->getCount();
   int lowest;
 
   q->peekIdx(&lowest, 0);
+  lowest = abs(lowest);
   for (int i = 0; i < queueCount; i++)
   {
     int x;
     q->peekIdx(&x, i);
-    if (x < lowest) // && x > DURATION_FILTER_MIN) // ignore very short times
+    x = abs(x);
+    if (x < lowest && x > DURATION_FILTER_MIN) // ignore very short times
     {
       lowest = x;
     }
   }
 
   // Find average of all values that are within n% of lowest.
-  // Median may be better but is more expensive
+  // May want to rethink this algorithm
   unsigned int total = 0;
   int count = 0;
   for (int i = 0; i < queueCount; i++)
   {
     int x;
     q->peekIdx(&x, i);
-    if (abs(lowest - x) < ((lowest * TIMING_PRECISION_PERCENTAGE) / 100))
+    x = abs(x);
+    if (abs(lowest - x) < (lowest * 0.2))
     {
       count++;
       total += x;
     }
   }
-  frame->baseDuration = total / count;
 
-  for (int i = 0; i < queueCount; i++)
+  return total / count;
+}
+
+bool populateFrame(cppQueue* q, dataFrame* frame)
+{
+  if (q == NULL || frame == NULL)
   {
-    if (i >= frame->length)
-    {
-      return false;
-    }
+    return false;
+  }
+  
+  frame->baseDuration = getBaseDuration(q);
+
+  cppQueue* fixed = new cppQueue(sizeof(int), QUEUE_LENGTH, FIFO, true);
+  int x;
+  q->peekIdx(&x, 0);
+  fixed->push(&x);
+  for (int i = 1; i < q->getCount(); i++)
+  {
     int x;
+    int x_previous;
     q->peekIdx(&x, i);
-    bool found = false;
-    for (int j = 0; j < 12; j++)
+    q->peekIdx(&x_previous, i-1);
+    if ((x > 0 && x_previous > 0) || (x > 0 && x_previous > 0))
     {
-      if ((x > ((j * frame->baseDuration * (100 - TIMING_PRECISION_PERCENTAGE) / 100))) && (x < ((j * frame->baseDuration * (100 + TIMING_PRECISION_PERCENTAGE) / 100))))
+      int unknown = 0;
+      fixed->push(&unknown);
+    }
+    fixed->push(&x);
+  }
+
+  frame->length = fixed->getCount();
+  frame->data = new int[frame->length];
+
+  for (int i = 0; i < frame->length; i++)
+  {
+    int x;
+    fixed->peekIdx(&x, i);
+    
+    if (x == 0)
+    {
+      frame->data[i] = 0;
+      continue;
+    }
+    
+    bool negative_x = x < 0;
+    x = abs(x);
+
+    bool found = false;
+    for (int j = 1; j < 12; j++)
+    {
+      if (abs(x - j*frame->baseDuration) < j*frame->baseDuration*(PRECISION_FACTOR_POPULATING))
       {
-        frame->data[i] = j;
+        frame->data[i] = j * (negative_x ? -1 : 1);
         found = true;
         break;
       }
     }
     if (!found)
     {
-      frame->data[i] = -1;
+      frame->data[i] = 0;
     }
   }
+  delete fixed;
   return true;
 }
+
+void categorizeFrame(dataFrame* f)
+{
+
+}
+
 
 void Analyze(void * parameter)
 {
   cppQueue* q_analysis = (cppQueue*) parameter;
-  if (!durationMissed)
-  {
+
+  //if (!durationMissed)
+  //{
     if (validateQueueSimple(q_analysis))
     {
-      int count = q_analysis->getCount();
-      int data[count];
-      dataFrame frame = {0, count, data};
+      dataFrame frame = {0, 0, nullptr};
       populateFrame(q_analysis, &frame);
       if (frame.baseDuration <= DURATION_FILTER_MAX)
       {
         printFrame(&frame);
+        categorizeFrame(&frame);
       }
     }
-  }
+  //}
   delete(q_analysis);
   analysis_active = false;
   vTaskDelete(analyze_task_handle);
@@ -300,13 +359,12 @@ void Analyze(void * parameter)
 
 void loop()
 {
-  digitalWrite(LED_PIN, !digitalRead(GDO0_PIN));
+  //digitalWrite(LED_PIN, !digitalRead(GDO0_PIN));
 
-
-  if (newDuration > 100)
+  if (abs(newDuration) > 100)
   {
     // newDuration is volatile so we explicitly take its current value
-    unsigned int duration = newDuration;
+    int duration = newDuration;
     queue->push(&duration);
   }
   newDuration = 0;
